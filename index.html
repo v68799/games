@@ -1,3 +1,135 @@
-<HTML>
-test
-</HTML>
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stuiterende Bal Animatie</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #0f172a; /* Donkere achtergrond */
+        }
+        canvas {
+            display: block;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-family: sans-serif;
+            pointer-events: none;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <h1 class="text-2xl font-bold">Kleurrijke Stuiterbal</h1>
+        <p class="opacity-70">De bal verandert van kleur bij elke botsing!</p>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        let width, height;
+        
+        // Bal eigenschappen
+        const ball = {
+            x: 100,
+            y: 100,
+            radius: 30,
+            dx: 5, // Snelheid X
+            dy: 4, // Snelheid Y
+            color: '#34d399' // Startkleur (Emerald)
+        };
+
+        // Functie om een willekeurige kleur te genereren
+        function getRandomColor() {
+            const colors = [
+                '#f87171', // Red
+                '#fb923c', // Orange
+                '#fbbf24', // Amber
+                '#a3e635', // Lime
+                '#22d3ee', // Cyan
+                '#818cf8', // Indigo
+                '#c084fc', // Purple
+                '#f472b6'  // Pink
+            ];
+            // Zorg dat we niet dezelfde kleur achter elkaar krijgen
+            let newColor;
+            do {
+                newColor = colors[Math.floor(Math.random() * colors.length)];
+            } while (newColor === ball.color);
+            return newColor;
+        }
+
+        // Canvas schalen naar venstergrootte
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width;
+            canvas.height = height;
+            
+            // Zorg dat de bal niet buiten het scherm komt na resize
+            if (ball.x + ball.radius > width) ball.x = width - ball.radius;
+            if (ball.y + ball.radius > height) ball.y = height - ball.radius;
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+
+        function drawBall() {
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+            ctx.fillStyle = ball.color;
+            
+            // Voeg een gloed effect toe
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = ball.color;
+            
+            ctx.fill();
+            ctx.closePath();
+            
+            // Reset schaduw voor andere elementen
+            ctx.shadowBlur = 0;
+        }
+
+        function update() {
+            // Wis het canvas
+            ctx.clearRect(0, 0, width, height);
+
+            drawBall();
+
+            // Verplaats de bal
+            ball.x += ball.dx;
+            ball.y += ball.dy;
+
+            // Botsing met zijkanten (Links/Rechts)
+            if (ball.x + ball.radius > width || ball.x - ball.radius < 0) {
+                ball.dx = -ball.dx;
+                ball.color = getRandomColor();
+            }
+
+            // Botsing met boven/onderkant
+            if (ball.y + ball.radius > height || ball.y - ball.radius < 0) {
+                ball.dy = -ball.dy;
+                ball.color = getRandomColor();
+            }
+
+            requestAnimationFrame(update);
+        }
+
+        // Start de animatielus wanneer de pagina is geladen
+        window.onload = () => {
+            update();
+        };
+    </script>
+</body>
+</html>
