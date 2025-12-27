@@ -2,134 +2,589 @@
 <html lang="nl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stuiterende Bal Animatie</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Controller & Touch Spel 3D</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body {
+        body, html {
             margin: 0;
+            padding: 0;
+            height: 100vh;
+            width: 100vw;
             overflow: hidden;
-            background-color: #0f172a; /* Donkere achtergrond */
+            background-color: #0f172a;
+            font-family: sans-serif;
+            touch-action: none; /* Voorkom scrollen en zoomen op touch */
         }
         canvas {
             display: block;
         }
-        #ui {
+        .player-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            gap: 1rem;
+            height: 70vh;
+            width: 90vw;
+        }
+        .player-card {
+            transition: all 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border-radius: 1rem;
+            font-weight: bold;
+        }
+        .bg-red-custom { background-color: #ef4444; }
+        .bg-green-custom { background-color: #22c55e; }
+        .waiting { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+        .bounce { animation: bounce 1s infinite; }
+        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+        #game-ui { display: none; }
+        
+        #game-over-overlay {
+            display: none;
             position: absolute;
-            top: 20px;
-            left: 20px;
-            color: white;
-            font-family: sans-serif;
-            pointer-events: none;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+            inset: 0;
+            background: rgba(15, 23, 42, 0.9);
+            z-index: 50;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+
+        /* Touch Joystick Styles */
+        #joystick-container {
+            position: absolute;
+            bottom: 40px;
+            left: 40px;
+            width: 120px;
+            height: 120px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+            display: none; /* Alleen tonen bij touch */
+            z-index: 100;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+        }
+        #joystick-knob {
+            position: absolute;
+            width: 50px;
+            height: 50px;
+            background: white;
+            border-radius: 50%;
+            top: 35px;
+            left: 35px;
+            box-shadow: 0 0 15px rgba(255,255,255,0.5);
+        }
+        #touch-start-btn {
+            position: absolute;
+            bottom: 40px;
+            right: 40px;
+            width: 80px;
+            height: 80px;
+            background: #eab308;
+            border-radius: 50%;
+            display: none;
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: black;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
         }
     </style>
 </head>
-<body>
+<body class="text-white flex flex-col items-center justify-center">
 
-    <div id="ui">
-        <h1 class="text-2xl font-bold">Kleurrijke Stuiterbal</h1>
-        <p class="opacity-70">De bal verandert van kleur bij elke botsing!</p>
+    <!-- KOPPELSCHERM -->
+    <div id="lobby" class="flex flex-col items-center justify-center w-full h-full">
+        <div class="h-[20vh] flex flex-col items-center justify-center text-center px-4">
+            <p id="start-message" class="text-2xl md:text-4xl font-black text-yellow-400 hidden uppercase tracking-tighter bounce">
+                DRUK OP 'A' OM TE STARTEN
+            </p>
+        </div>
+        <div id="playerGrid" class="player-grid"></div>
     </div>
 
-    <canvas id="canvas"></canvas>
+    <!-- SPEL SCHERM -->
+    <div id="game-ui" class="absolute inset-0">
+        <canvas id="gameCanvas"></canvas>
+        
+        <!-- Virtuele Controls -->
+        <div id="joystick-container">
+            <div id="joystick-knob"></div>
+        </div>
+        <div id="touch-start-btn">A</div>
+
+        <!-- WINNAAR OVERLAY -->
+        <div id="game-over-overlay">
+            <h1 id="winner-text" class="text-5xl md:text-7xl font-black text-yellow-400 mb-4 uppercase italic">SPELER 1 HEEFT GEWONNEN!</h1>
+            <p id="restart-hint" class="text-xl md:text-2xl text-white opacity-80 mb-8 tracking-widest">DRUK OP 'A' OM OPNIEUW TE BEGINNEN</p>
+        </div>
+    </div>
 
     <script>
-        const canvas = document.getElementById('canvas');
+        const lobby = document.getElementById('lobby');
+        const gameUI = document.getElementById('game-ui');
+        const gameOverOverlay = document.getElementById('game-over-overlay');
+        const winnerText = document.getElementById('winner-text');
+        const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
-
-        let width, height;
+        const startMessage = document.getElementById('start-message');
+        const playerGrid = document.getElementById('playerGrid');
         
-        // Bal eigenschappen
-        const ball = {
-            x: 100,
-            y: 100,
-            radius: 30,
-            dx: 5, // Snelheid X
-            dy: 4, // Snelheid Y
-            color: '#34d399' // Startkleur (Emerald)
-        };
+        // Touch elements
+        const joystickContainer = document.getElementById('joystick-container');
+        const joystickKnob = document.getElementById('joystick-knob');
+        const touchStartBtn = document.getElementById('touch-start-btn');
 
-        // Functie om een willekeurige kleur te genereren
-        function getRandomColor() {
-            const colors = [
-                '#f87171', // Red
-                '#fb923c', // Orange
-                '#fbbf24', // Amber
-                '#a3e635', // Lime
-                '#22d3ee', // Cyan
-                '#818cf8', // Indigo
-                '#c084fc', // Purple
-                '#f472b6'  // Pink
-            ];
-            // Zorg dat we niet dezelfde kleur achter elkaar krijgen
-            let newColor;
-            do {
-                newColor = colors[Math.floor(Math.random() * colors.length)];
-            } while (newColor === ball.color);
-            return newColor;
-        }
+        const totalPlayers = 12;
+        let gameStarted = false;
+        let isGameOver = false;
+        let audioCtx = null;
+        let audioEnabled = false;
+        let isTouchDevice = false;
+        
+        let speedMultiplier = 1.0;
+        let lastSpeedUpdateTime = 0;
 
-        // Canvas schalen naar venstergrootte
-        function resize() {
-            width = window.innerWidth;
-            height = window.innerHeight;
-            canvas.width = width;
-            canvas.height = height;
+        let players = Array.from({ length: totalPlayers }, (_, i) => ({
+            id: i + 1,
+            connected: false,
+            gamepadIndex: null,
+            x: 0,
+            y: 0,
+            radius: 35,
+            color: '#22c55e',
+            alive: true,
+            invulnerable: true,
+            touchDx: 0, // Voor joystick input
+            touchDy: 0
+        }));
+
+        let enemyBalls = [];
+
+        // --- TOUCH LOGICA ---
+        let joystickActive = false;
+        let joystickStart = { x: 0, y: 0 };
+        
+        function handleTouchStart(e) {
+            enableAudio();
+            if (!isTouchDevice) {
+                isTouchDevice = true;
+                joystickContainer.style.display = 'block';
+                touchStartBtn.style.display = 'flex';
+                // Koppel automatisch speler 1 aan touch als er geen gamepad is
+                if (!players[0].connected) {
+                    players[0].connected = true;
+                    initUI();
+                }
+            }
+
+            const touch = e.touches[0];
+            const rect = joystickContainer.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
             
-            // Zorg dat de bal niet buiten het scherm komt na resize
-            if (ball.x + ball.radius > width) ball.x = width - ball.radius;
-            if (ball.y + ball.radius > height) ball.y = height - ball.radius;
+            // Check of joystick wordt aangeraakt
+            const dist = Math.hypot(touch.clientX - centerX, touch.clientY - centerY);
+            if (dist < 80) {
+                joystickActive = true;
+            }
+
+            // Check of startknop wordt aangeraakt
+            const btnRect = touchStartBtn.getBoundingClientRect();
+            if (touch.clientX > btnRect.left && touch.clientX < btnRect.right && 
+                touch.clientY > btnRect.top && touch.clientY < btnRect.bottom) {
+                handleGlobalStart();
+            }
         }
 
-        window.addEventListener('resize', resize);
-        resize();
+        function handleTouchMove(e) {
+            if (!joystickActive) return;
+            e.preventDefault();
+            const touch = e.touches[0];
+            const rect = joystickContainer.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
 
-        function drawBall() {
+            let dx = touch.clientX - centerX;
+            let dy = touch.clientY - centerY;
+            const maxDist = 45;
+            const dist = Math.hypot(dx, dy);
+
+            if (dist > maxDist) {
+                dx = (dx / dist) * maxDist;
+                dy = (dy / dist) * maxDist;
+            }
+
+            joystickKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+            
+            // Zet om naar -1 tot 1 voor spelers-input (zoals axes van gamepad)
+            if (players[0].connected) {
+                players[0].touchDx = dx / maxDist;
+                players[0].touchDy = dy / maxDist;
+            }
+        }
+
+        function handleTouchEnd() {
+            joystickActive = false;
+            joystickKnob.style.transform = `translate(0px, 0px)`;
+            if (players[0].connected) {
+                players[0].touchDx = 0;
+                players[0].touchDy = 0;
+            }
+        }
+
+        window.addEventListener('touchstart', handleTouchStart, { passive: false });
+        window.addEventListener('touchmove', handleTouchMove, { passive: false });
+        window.addEventListener('touchend', handleTouchEnd);
+
+        function initUI() {
+            if (gameStarted) return;
+            playerGrid.innerHTML = '';
+            players.forEach(player => {
+                const div = document.createElement('div');
+                const statusClass = player.connected ? 'bg-green-custom' : 'bg-red-custom waiting';
+                div.className = `player-card ${statusClass}`;
+                div.innerHTML = `
+                    <div class="text-2xl md:text-4xl">Speler ${player.id}</div>
+                    <div class="text-sm md:text-lg mt-2 opacity-80 uppercase tracking-tighter">
+                        ${player.connected ? 'Gereed' : 'Druk op B'}
+                    </div>
+                `;
+                playerGrid.appendChild(div);
+            });
+
+            // Toon startbericht als er tenminste één speler is
+            if (players.some(p => p.connected)) {
+                startMessage.classList.remove('hidden');
+            } else {
+                startMessage.classList.add('hidden');
+            }
+        }
+
+        function playSound(freq1, freq2, duration = 0.3, volume = 0.1, type = 'sine') {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq1, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(freq2, audioCtx.currentTime + 0.1);
+            gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + duration);
+        }
+
+        function playVictorySound() {
+            if (!audioCtx) return;
+            const now = audioCtx.currentTime;
+            const notes = [523.25, 659.25, 783.99, 1046.50, 1318.51]; 
+            notes.forEach((freq, i) => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(freq, now + i * 0.1);
+                gain.gain.setValueAtTime(0.05, now + i * 0.1);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.1 + 0.6);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start(now + i * 0.1);
+                osc.stop(now + i * 0.1 + 0.7);
+            });
+        }
+
+        function enableAudio() {
+            if (!audioEnabled) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                audioEnabled = true;
+            }
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+        }
+
+        function draw3DBall(x, y, radius, color, isPlayer = false, invulnerable = false) {
+            ctx.save();
+            if (isPlayer && invulnerable && Math.floor(Date.now() / 150) % 2 === 0) {
+                ctx.restore();
+                return;
+            }
             ctx.beginPath();
-            ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
-            ctx.fillStyle = ball.color;
-            
-            // Voeg een gloed effect toe
-            ctx.shadowBlur = 20;
-            ctx.shadowColor = ball.color;
-            
+            ctx.ellipse(x, y + radius * 0.8, radius * 0.8, radius * 0.2, 0, 0, Math.PI * 2);
+            ctx.fillStyle = "rgba(0,0,0,0.3)";
             ctx.fill();
             ctx.closePath();
+
+            const gradient = ctx.createRadialGradient(x - radius * 0.3, y - radius * 0.3, radius * 0.1, x, y, radius);
+            gradient.addColorStop(0, '#ffffff'); 
+            gradient.addColorStop(0.2, color);  
+            gradient.addColorStop(1, '#000000'); 
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fillStyle = gradient;
+            if (isPlayer) {
+                ctx.shadowBlur = invulnerable ? 10 : 20;
+                ctx.shadowColor = invulnerable ? '#ffffff' : color;
+            }
+            ctx.fill();
+            ctx.closePath();
+            ctx.restore();
+        }
+
+        function getBaseVelocity() {
+            const diagonal = Math.sqrt(canvas.width ** 2 + canvas.height ** 2);
+            return diagonal / (8 * 60); 
+        }
+
+        function handleGlobalStart() {
+            if (!gameStarted && players.some(p => p.connected)) {
+                startGame();
+            } else if (isGameOver) {
+                startGame();
+            }
+        }
+
+        function startGame() {
+            isGameOver = false;
+            gameStarted = true;
+            speedMultiplier = 1.0; 
+            lastSpeedUpdateTime = Date.now();
             
-            // Reset schaduw voor andere elementen
-            ctx.shadowBlur = 0;
-        }
+            gameOverOverlay.style.display = 'none';
+            lobby.style.display = 'none';
+            gameUI.style.display = 'block';
+            
+            resizeCanvas();
 
-        function update() {
-            // Wis het canvas
-            ctx.clearRect(0, 0, width, height);
+            players.forEach(p => {
+                if(p.connected) {
+                    p.x = Math.random() * (canvas.width - 100) + 50;
+                    p.y = Math.random() * (canvas.height - 100) + 50;
+                    p.alive = true;
+                    p.invulnerable = true;
+                }
+            });
 
-            drawBall();
+            setTimeout(() => {
+                players.forEach(p => p.invulnerable = false);
+            }, 5000);
 
-            // Verplaats de bal
-            ball.x += ball.dx;
-            ball.y += ball.dy;
-
-            // Botsing met zijkanten (Links/Rechts)
-            if (ball.x + ball.radius > width || ball.x - ball.radius < 0) {
-                ball.dx = -ball.dx;
-                ball.color = getRandomColor();
+            const freshBaseSpeed = getBaseVelocity();
+            enemyBalls = [];
+            for (let i = 0; i < 5; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                enemyBalls.push({
+                    x: Math.random() * (canvas.width - 100) + 50,
+                    y: Math.random() * (canvas.height - 100) + 50,
+                    vx: Math.cos(angle) * freshBaseSpeed,
+                    vy: Math.sin(angle) * freshBaseSpeed,
+                    radius: 30,
+                    color: getRandomColor(),
+                    baseSpeed: freshBaseSpeed
+                });
             }
 
-            // Botsing met boven/onderkant
-            if (ball.y + ball.radius > height || ball.y - ball.radius < 0) {
-                ball.dy = -ball.dy;
-                ball.color = getRandomColor();
+            if (!window.loopRunning) {
+                window.loopRunning = true;
+                requestAnimationFrame(gameLoop);
             }
-
-            requestAnimationFrame(update);
         }
 
-        // Start de animatielus wanneer de pagina is geladen
-        window.onload = () => {
-            update();
-        };
+        function getRandomColor() {
+            const colors = ['#ff4444', '#4444ff', '#ffff44', '#ff44ff', '#44ffff', '#ffffff', '#ff9900'];
+            return colors[Math.floor(Math.random() * colors.length)];
+        }
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+
+        function resolveBallCollision(b1, b2) {
+            const dx = b2.x - b1.x;
+            const dy = b2.y - b1.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            if (distance < b1.radius + b2.radius) {
+                const nx = dx / distance;
+                const ny = dy / distance;
+                const vRelative = (b1.vx - b2.vx) * nx + (b1.vy - b2.vy) * ny;
+                
+                if (vRelative > 0) {
+                    const impulse = vRelative;
+                    b1.vx -= impulse * nx;
+                    b1.vy -= impulse * ny;
+                    b2.vx += impulse * nx;
+                    b2.vy += impulse * ny;
+                    
+                    [b1, b2].forEach(b => {
+                        const currentMag = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+                        if (currentMag > 0) {
+                            b.vx = (b.vx / currentMag) * b.baseSpeed;
+                            b.vy = (b.vy / currentMag) * b.baseSpeed;
+                        }
+                    });
+                    playSound(150, 200, 0.1, 0.05, 'triangle');
+                }
+                const overlap = b1.radius + b2.radius - distance;
+                b1.x -= overlap * 0.5 * nx;
+                b1.y -= overlap * 0.5 * ny;
+                b2.x += overlap * 0.5 * nx;
+                b2.y += overlap * 0.5 * ny;
+            }
+        }
+
+        function checkEndGame() {
+            if (isGameOver) return;
+            const connectedPlayers = players.filter(p => p.connected);
+            const alivePlayers = connectedPlayers.filter(p => p.alive);
+            
+            if (connectedPlayers.length > 1) {
+                if (alivePlayers.length === 1) endGame(alivePlayers[0]);
+                else if (alivePlayers.length === 0) endGame(null);
+            } else if (connectedPlayers.length === 1) {
+                if (alivePlayers.length === 0) endGame(null, true);
+            }
+        }
+
+        function endGame(winner = null, isSoloGameOver = false) {
+            isGameOver = true;
+            gameOverOverlay.style.display = 'flex';
+            if (isSoloGameOver) {
+                winnerText.innerText = `GAME OVER!`;
+            } else if (winner) {
+                winnerText.innerText = `SPELER ${winner.id} HEEFT GEWONNEN!`;
+            } else {
+                winnerText.innerText = `GOED GESPEELD!`;
+            }
+            playVictorySound();
+        }
+
+        function gameLoop() {
+            if (!gameStarted) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const now = Date.now();
+            if (!isGameOver) {
+                if (now - lastSpeedUpdateTime > 1000) {
+                    speedMultiplier *= 1.02; 
+                    lastSpeedUpdateTime = now;
+                }
+            }
+
+            const gamepads = navigator.getGamepads();
+
+            enemyBalls.forEach(b => {
+                let hitWall = false;
+                b.x += b.vx * speedMultiplier;
+                b.y += b.vy * speedMultiplier;
+
+                if (b.x - b.radius < 0) { b.vx = Math.abs(b.vx); hitWall = true; }
+                else if (b.x + b.radius > canvas.width) { b.vx = -Math.abs(b.vx); hitWall = true; }
+
+                if (b.y - b.radius < 0) { b.vy = Math.abs(b.vy); hitWall = true; }
+                else if (b.y + b.radius > canvas.height) { b.vy = -Math.abs(b.vy); hitWall = true; }
+
+                if (hitWall) playSound(80, 60, 0.05, 0.03, 'square');
+            });
+
+            for (let i = 0; i < enemyBalls.length; i++) {
+                for (let j = i + 1; j < enemyBalls.length; j++) {
+                    resolveBallCollision(enemyBalls[i], enemyBalls[j]);
+                }
+            }
+
+            enemyBalls.forEach(b => draw3DBall(b.x, b.y, b.radius, b.color));
+
+            players.forEach(p => {
+                if (!p.connected || !p.alive) return;
+                const gp = gamepads[p.gamepadIndex];
+                
+                if (!isGameOver) {
+                    const speed = 10;
+                    // Gamepad input
+                    if (gp) {
+                        if (Math.abs(gp.axes[0]) > 0.1) p.x += gp.axes[0] * speed;
+                        if (Math.abs(gp.axes[1]) > 0.1) p.y += gp.axes[1] * speed;
+                    }
+                    // Touch input
+                    if (p.id === 1 && isTouchDevice) {
+                        p.x += p.touchDx * speed;
+                        p.y += p.touchDy * speed;
+                    }
+
+                    p.x = Math.max(p.radius, Math.min(canvas.width - p.radius, p.x));
+                    p.y = Math.max(p.radius, Math.min(canvas.height - p.radius, p.y));
+                }
+
+                if (!p.invulnerable && !isGameOver) {
+                    enemyBalls.forEach(b => {
+                        const dx = p.x - b.x;
+                        const dy = p.y - b.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        if (dist < p.radius + b.radius) {
+                            p.alive = false;
+                            playSound(300, 100, 0.4, 0.2);
+                            checkEndGame();
+                        }
+                    });
+                }
+                draw3DBall(p.x, p.y, p.radius, '#22c55e', true, p.invulnerable);
+                ctx.fillStyle = "white";
+                ctx.font = "bold 16px Arial";
+                ctx.textAlign = "center";
+                ctx.fillText(`P${p.id}`, p.x, p.y + 6);
+            });
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function updateLobbyLogic() {
+            const gamepads = navigator.getGamepads();
+            for (const gp of gamepads) {
+                if (!gp) continue;
+                const bPressed = gp.buttons[1]?.pressed;
+                const aPressed = gp.buttons[0]?.pressed;
+
+                if (bPressed && !gameStarted) {
+                    enableAudio();
+                    const alreadyMapped = players.some(p => p.gamepadIndex === gp.index);
+                    if (!alreadyMapped) {
+                        const freePlayer = players.find(p => !p.connected);
+                        if (freePlayer) {
+                            freePlayer.connected = true;
+                            freePlayer.gamepadIndex = gp.index;
+                            playSound(523, 1046);
+                            initUI();
+                        }
+                    }
+                }
+
+                if (aPressed) {
+                    handleGlobalStart();
+                }
+            }
+            requestAnimationFrame(updateLobbyLogic);
+        }
+
+        window.addEventListener("gamepaddisconnected", (e) => {
+            const player = players.find(p => p.gamepadIndex === e.gamepad.index);
+            if (player) {
+                player.connected = false;
+                player.gamepadIndex = null;
+                if (!gameStarted) initUI();
+            }
+        });
+
+        initUI();
+        updateLobbyLogic();
     </script>
 </body>
 </html>
