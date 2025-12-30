@@ -3,13 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Physics Arena 10x10 - Clean UI</title>
+    <title>Physics Arena 10x10 - Mobile Optimized</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; touch-action: none; font-family: sans-serif; user-select: none; }
         canvas { display: block; }
         
-        /* Joysticks verschijnen alleen op touch-apparaten */
         #touch-controls {
             position: fixed;
             bottom: 40px;
@@ -57,6 +56,7 @@
 
     <script id="pathTracerFrag" type="x-shader/x-fragment">
         precision highp float;
+        precision highp int;
         
         uniform sampler2D uAccumTexture;
         uniform vec2 uResolution;
@@ -73,7 +73,7 @@
         #define MAX_BOUNCES 3
         #define PI 3.14159265359
         #define SUN_DIR normalize(vec3(0.5, 1.0, 0.3))
-        #define SUN_COL vec3(1.0, 0.9, 0.7) * 4.0
+        #define SUN_COL vec3(1.0, 0.9, 0.7) * 3.5
         #define ARENA_SIZE 5.0
 
         float hash12(vec2 p) {
@@ -179,13 +179,16 @@
                 }
             }
 
-            vec3 color = radiance;
+            vec3 finalCol = radiance;
             if(uFrame > 0) {
                 vec2 sampleUV = gl_FragCoord.xy / uResolution;
                 vec3 prevColor = texture2D(uAccumTexture, sampleUV).rgb;
-                color = mix(prevColor, radiance, 1.0 / (float(uFrame) + 1.0));
+                // Veilige mix om zwarte artifacts op mobiel te voorkomen
+                finalCol = mix(prevColor, radiance, 1.0 / (float(uFrame) + 1.0));
             }
-            gl_FragColor = vec4(color, 1.0);
+            
+            // Clamp om NaN/Infinity te voorkomen op mobiele GPU's
+            gl_FragColor = vec4(clamp(finalCol, 0.0, 10.0), 1.0);
         }
     </script>
 
@@ -269,7 +272,6 @@
             for (let i = 0; i < gamepads.length; i++) {
                 if (gamepads[i]) { gp = gamepads[i]; break; }
             }
-
             if (gp) {
                 const applyDeadzone = (val) => Math.abs(val) < 0.15 ? 0 : val;
                 inputState.moveX = applyDeadzone(gp.axes[0]);
@@ -330,7 +332,6 @@
         }
 
         function setupUniversalControls() {
-            // Toon joysticks alleen als touch ondersteund wordt
             const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
             if (isTouch) {
                 document.getElementById('touch-controls').style.display = 'flex';
@@ -356,14 +357,8 @@
                     }
 
                     knob.style.transform = `translate(${dx}px, ${dy}px)`;
-                    
-                    if (isLeft) {
-                        inputState.moveX = dx / maxDist;
-                        inputState.moveY = dy / maxDist;
-                    } else {
-                        inputState.lookX = dx / maxDist;
-                        inputState.lookY = dy / maxDist;
-                    }
+                    if (isLeft) { inputState.moveX = dx / maxDist; inputState.moveY = dy / maxDist; }
+                    else { inputState.lookX = dx / maxDist; inputState.lookY = dy / maxDist; }
                     ensureAudioActivated();
                 };
 
@@ -374,9 +369,7 @@
                 });
 
                 container.addEventListener('pointermove', (e) => {
-                    if (activePointerId === e.pointerId) {
-                        updatePosition(e.clientX, e.clientY);
-                    }
+                    if (activePointerId === e.pointerId) updatePosition(e.clientX, e.clientY);
                 });
 
                 const stop = (e) => {
@@ -387,7 +380,6 @@
                         else { inputState.lookX = 0; inputState.lookY = 0; }
                     }
                 };
-
                 container.addEventListener('pointerup', stop);
                 container.addEventListener('pointercancel', stop);
             };
@@ -405,7 +397,24 @@
             initPhysics(); 
             setupUniversalControls();
 
-            const p = { format: THREE.RGBAFormat, type: THREE.FloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter };
+            // Check voor float ondersteuning op mobiel
+            const gl = renderer.getContext();
+            let type = THREE.FloatType;
+            if (!gl.getExtension('OES_texture_float')) {
+                if (gl.getExtension('OES_texture_half_float')) {
+                    type = THREE.HalfFloatType;
+                } else {
+                    type = THREE.UnsignedByteType; // Fallback (minder kwaliteit)
+                }
+            }
+
+            const p = { 
+                format: THREE.RGBAFormat, 
+                type: type, 
+                minFilter: THREE.NearestFilter, 
+                magFilter: THREE.NearestFilter 
+            };
+            
             rtA = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, p);
             rtB = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, p);
 
