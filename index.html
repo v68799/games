@@ -2,589 +2,458 @@
 <html lang="nl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Controller & Touch Spel 3D</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Physics Arena 10x10 - Clean UI</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
-        body, html {
-            margin: 0;
-            padding: 0;
-            height: 100vh;
-            width: 100vw;
-            overflow: hidden;
-            background-color: #0f172a;
-            font-family: sans-serif;
-            touch-action: none; /* Voorkom scrollen en zoomen op touch */
-        }
-        canvas {
-            display: block;
-        }
-        .player-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            grid-template-rows: repeat(3, 1fr);
-            gap: 1rem;
-            height: 70vh;
-            width: 90vw;
-        }
-        .player-card {
-            transition: all 0.3s ease;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            border-radius: 1rem;
-            font-weight: bold;
-        }
-        .bg-red-custom { background-color: #ef4444; }
-        .bg-green-custom { background-color: #22c55e; }
-        .waiting { animation: pulse 2s infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
-        .bounce { animation: bounce 1s infinite; }
-        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
-        #game-ui { display: none; }
+        body { margin: 0; overflow: hidden; background-color: #000; touch-action: none; font-family: sans-serif; user-select: none; }
+        canvas { display: block; }
         
-        #game-over-overlay {
-            display: none;
-            position: absolute;
-            inset: 0;
-            background: rgba(15, 23, 42, 0.9);
-            z-index: 50;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-        }
-
-        /* Touch Joystick Styles */
-        #joystick-container {
-            position: absolute;
+        /* Joysticks verschijnen alleen op touch-apparaten */
+        #touch-controls {
+            position: fixed;
             bottom: 40px;
-            left: 40px;
+            left: 0;
+            right: 0;
+            display: none; 
+            justify-content: space-between;
+            padding: 0 50px;
+            pointer-events: none;
+            z-index: 100;
+        }
+        .joystick-container {
             width: 120px;
             height: 120px;
             background: rgba(255, 255, 255, 0.1);
             border-radius: 50%;
-            display: none; /* Alleen tonen bij touch */
-            z-index: 100;
+            position: relative;
+            pointer-events: auto;
             border: 2px solid rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(8px);
+            touch-action: none;
         }
-        #joystick-knob {
-            position: absolute;
+        .joystick-knob {
             width: 50px;
             height: 50px;
-            background: white;
+            background: rgba(255, 255, 255, 0.5);
             border-radius: 50%;
+            position: absolute;
             top: 35px;
             left: 35px;
-            box-shadow: 0 0 15px rgba(255,255,255,0.5);
-        }
-        #touch-start-btn {
-            position: absolute;
-            bottom: 40px;
-            right: 40px;
-            width: 80px;
-            height: 80px;
-            background: #eab308;
-            border-radius: 50%;
-            display: none;
-            z-index: 100;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            color: black;
+            pointer-events: none;
             box-shadow: 0 4px 10px rgba(0,0,0,0.3);
         }
     </style>
 </head>
-<body class="text-white flex flex-col items-center justify-center">
-
-    <!-- KOPPELSCHERM -->
-    <div id="lobby" class="flex flex-col items-center justify-center w-full h-full">
-        <div class="h-[20vh] flex flex-col items-center justify-center text-center px-4">
-            <p id="start-message" class="text-2xl md:text-4xl font-black text-yellow-400 hidden uppercase tracking-tighter bounce">
-                DRUK OP 'A' OM TE STARTEN
-            </p>
+<body>
+    <div id="touch-controls">
+        <div class="joystick-container" id="move-joystick">
+            <div class="joystick-knob" id="move-knob"></div>
         </div>
-        <div id="playerGrid" class="player-grid"></div>
-    </div>
-
-    <!-- SPEL SCHERM -->
-    <div id="game-ui" class="absolute inset-0">
-        <canvas id="gameCanvas"></canvas>
-        
-        <!-- Virtuele Controls -->
-        <div id="joystick-container">
-            <div id="joystick-knob"></div>
-        </div>
-        <div id="touch-start-btn">A</div>
-
-        <!-- WINNAAR OVERLAY -->
-        <div id="game-over-overlay">
-            <h1 id="winner-text" class="text-5xl md:text-7xl font-black text-yellow-400 mb-4 uppercase italic">SPELER 1 HEEFT GEWONNEN!</h1>
-            <p id="restart-hint" class="text-xl md:text-2xl text-white opacity-80 mb-8 tracking-widest">DRUK OP 'A' OM OPNIEUW TE BEGINNEN</p>
+        <div class="joystick-container" id="look-joystick">
+            <div class="joystick-knob" id="look-knob"></div>
         </div>
     </div>
 
-    <script>
-        const lobby = document.getElementById('lobby');
-        const gameUI = document.getElementById('game-ui');
-        const gameOverOverlay = document.getElementById('game-over-overlay');
-        const winnerText = document.getElementById('winner-text');
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
-        const startMessage = document.getElementById('start-message');
-        const playerGrid = document.getElementById('playerGrid');
+    <script id="pathTracerFrag" type="x-shader/x-fragment">
+        precision highp float;
         
-        // Touch elements
-        const joystickContainer = document.getElementById('joystick-container');
-        const joystickKnob = document.getElementById('joystick-knob');
-        const touchStartBtn = document.getElementById('touch-start-btn');
+        uniform sampler2D uAccumTexture;
+        uniform vec2 uResolution;
+        uniform int uFrame;
+        uniform vec3 uCamPos;
+        uniform vec3 uCamDir;
+        uniform vec3 uCamUp;
+        uniform vec3 uCamRight;
 
-        const totalPlayers = 12;
-        let gameStarted = false;
-        let isGameOver = false;
-        let audioCtx = null;
-        let audioEnabled = false;
-        let isTouchDevice = false;
-        
-        let speedMultiplier = 1.0;
-        let lastSpeedUpdateTime = 0;
+        uniform vec3 uBallPos[10];
+        uniform vec3 uBallCol[10];
+        uniform float uBallRad[10];
 
-        let players = Array.from({ length: totalPlayers }, (_, i) => ({
-            id: i + 1,
-            connected: false,
-            gamepadIndex: null,
-            x: 0,
-            y: 0,
-            radius: 35,
-            color: '#22c55e',
-            alive: true,
-            invulnerable: true,
-            touchDx: 0, // Voor joystick input
-            touchDy: 0
-        }));
+        #define MAX_BOUNCES 3
+        #define PI 3.14159265359
+        #define SUN_DIR normalize(vec3(0.5, 1.0, 0.3))
+        #define SUN_COL vec3(1.0, 0.9, 0.7) * 4.0
+        #define ARENA_SIZE 5.0
 
-        let enemyBalls = [];
+        float hash12(vec2 p) {
+            vec3 p3  = fract(vec3(p.xyx) * .1031);
+            p3 += dot(p3, p3.yzx + 33.33);
+            return fract((p3.x + p3.y) * p3.z);
+        }
 
-        // --- TOUCH LOGICA ---
-        let joystickActive = false;
-        let joystickStart = { x: 0, y: 0 };
-        
-        function handleTouchStart(e) {
-            enableAudio();
-            if (!isTouchDevice) {
-                isTouchDevice = true;
-                joystickContainer.style.display = 'block';
-                touchStartBtn.style.display = 'flex';
-                // Koppel automatisch speler 1 aan touch als er geen gamepad is
-                if (!players[0].connected) {
-                    players[0].connected = true;
-                    initUI();
+        vec3 cosWeightedHemisphere(vec3 n, vec2 seed) {
+            vec3 u = normalize(cross(abs(n.x) > 0.1 ? vec3(0, 1, 0) : vec3(1, 0, 0), n));
+            vec3 v = cross(n, u);
+            float r1 = 2.0 * PI * hash12(seed);
+            float r2 = hash12(seed + 0.56);
+            float r2s = sqrt(r2);
+            return normalize(u * cos(r1) * r2s + v * sin(r1) * r2s + n * sqrt(1.0 - r2));
+        }
+
+        struct Ray { vec3 origin; vec3 dir; };
+        struct Hit { float dist; vec3 pos; vec3 normal; vec3 color; float metal; };
+
+        Hit intersectSphere(Ray ray, vec3 center, float rad, vec3 col, float m) {
+            vec3 oc = ray.origin - center;
+            float b = dot(oc, ray.dir);
+            float c = dot(oc, oc) - rad * rad;
+            float h = b*b - c;
+            if(h < 0.0) return Hit(-1.0, vec3(0), vec3(0), vec3(0), 0.0);
+            float d = -b - sqrt(h);
+            if(d < 0.001) d = -b + sqrt(h);
+            if(d < 0.001) return Hit(-1.0, vec3(0), vec3(0), vec3(0), 0.0);
+            vec3 p = ray.origin + d * ray.dir;
+            return Hit(d, p, normalize(p - center), col, m);
+        }
+
+        Hit getScene(Ray ray) {
+            Hit closest = Hit(1e10, vec3(0), vec3(0), vec3(0), 0.0);
+            
+            float dPlane = (-1.0 - ray.origin.y) / (ray.dir.y + 1e-7);
+            if(dPlane > 0.001) {
+                vec3 p = ray.origin + dPlane * ray.dir;
+                if(abs(p.x) < ARENA_SIZE && abs(p.z) < ARENA_SIZE) {
+                    bool check = (fract(p.x * 1.0) > 0.5 == fract(p.z * 1.0) > 0.5);
+                    vec3 col = check ? vec3(0.2) : vec3(0.12);
+                    closest = Hit(dPlane, p, vec3(0, 1, 0), col, 0.5);
                 }
             }
 
-            const touch = e.touches[0];
-            const rect = joystickContainer.getBoundingClientRect();
-            const centerX = rect.left + rect.width / 2;
-            const centerY = rect.top + rect.height / 2;
-            
-            // Check of joystick wordt aangeraakt
-            const dist = Math.hypot(touch.clientX - centerX, touch.clientY - centerY);
-            if (dist < 80) {
-                joystickActive = true;
+            float dWalls[4];
+            dWalls[0] = (-ARENA_SIZE - ray.origin.x) / (ray.dir.x + 1e-7);
+            dWalls[1] = (ARENA_SIZE - ray.origin.x) / (ray.dir.x + 1e-7);
+            dWalls[2] = (-ARENA_SIZE - ray.origin.z) / (ray.dir.z + 1e-7);
+            dWalls[3] = (ARENA_SIZE - ray.origin.z) / (ray.dir.z + 1e-7);
+
+            vec3 nls[4]; nls[0]=vec3(1,0,0); nls[1]=vec3(-1,0,0); nls[2]=vec3(0,0,1); nls[3]=vec3(0,0,-1);
+
+            for(int i=0; i<4; i++){
+                if(dWalls[i] > 0.001 && dWalls[i] < closest.dist) {
+                    vec3 p = ray.origin + dWalls[i] * ray.dir;
+                    if(p.y >= -1.0 && p.y <= 0.0) {
+                        float crossCoord = (i < 2) ? p.z : p.x;
+                        if(abs(crossCoord) <= ARENA_SIZE) closest = Hit(dWalls[i], p, nls[i], vec3(0.4, 0.4, 0.45), 0.2);
+                    }
+                }
             }
 
-            // Check of startknop wordt aangeraakt
-            const btnRect = touchStartBtn.getBoundingClientRect();
-            if (touch.clientX > btnRect.left && touch.clientX < btnRect.right && 
-                touch.clientY > btnRect.top && touch.clientY < btnRect.bottom) {
-                handleGlobalStart();
+            for(int i=0; i<10; i++) {
+                Hit h = intersectSphere(ray, uBallPos[i], uBallRad[i], uBallCol[i], 0.5);
+                if(h.dist > 0.0 && h.dist < closest.dist) closest = h;
             }
+            return closest;
         }
 
-        function handleTouchMove(e) {
-            if (!joystickActive) return;
-            e.preventDefault();
-            const touch = e.touches[0];
-            const rect = joystickContainer.getBoundingClientRect();
-            const centerX = rect.left + rect.width / 2;
-            const centerY = rect.top + rect.height / 2;
+        void main() {
+            vec2 seed = gl_FragCoord.xy + float(uFrame) * 14.532;
+            vec2 jitter = vec2(hash12(seed), hash12(seed + 0.53)) - 0.5;
+            vec2 uv = (gl_FragCoord.xy + jitter - 0.5 * uResolution.xy) / uResolution.y;
 
-            let dx = touch.clientX - centerX;
-            let dy = touch.clientY - centerY;
-            const maxDist = 45;
-            const dist = Math.hypot(dx, dy);
+            vec3 rDir = normalize(uCamDir + uv.x * uCamRight + uv.y * uCamUp);
+            Ray ray = Ray(uCamPos, rDir);
+            vec3 throughput = vec3(1.0);
+            vec3 radiance = vec3(0.0);
 
-            if (dist > maxDist) {
-                dx = (dx / dist) * maxDist;
-                dy = (dy / dist) * maxDist;
+            for(int i = 0; i < MAX_BOUNCES; i++) {
+                Hit hit = getScene(ray);
+                if(hit.dist < 1e5) {
+                    Ray sRay = Ray(hit.pos + hit.normal * 0.001, SUN_DIR);
+                    if(getScene(sRay).dist > 1e5) {
+                        radiance += throughput * hit.color * SUN_COL * max(0.0, dot(hit.normal, SUN_DIR)) * (1.0 - hit.metal);
+                    }
+                    
+                    float fresnel = 0.02 + 0.98 * pow(1.0 - max(0.0, dot(-ray.dir, hit.normal)), 5.0);
+                    
+                    if(hash12(seed + float(i) * 0.76) < (fresnel * 0.5 + hit.metal)) {
+                        ray.dir = reflect(ray.dir, hit.normal);
+                    } else {
+                        ray.dir = cosWeightedHemisphere(hit.normal, seed + float(i) * 0.91);
+                        throughput *= hit.color;
+                    }
+                    ray.origin = hit.pos + hit.normal * 0.001;
+                } else {
+                    float sky = max(0.0, ray.dir.y);
+                    radiance += throughput * mix(vec3(0.02, 0.05, 0.15), vec3(0.5, 0.7, 1.0), sky);
+                    break;
+                }
             }
 
-            joystickKnob.style.transform = `translate(${dx}px, ${dy}px)`;
-            
-            // Zet om naar -1 tot 1 voor spelers-input (zoals axes van gamepad)
-            if (players[0].connected) {
-                players[0].touchDx = dx / maxDist;
-                players[0].touchDy = dy / maxDist;
+            vec3 color = radiance;
+            if(uFrame > 0) {
+                vec2 sampleUV = gl_FragCoord.xy / uResolution;
+                vec3 prevColor = texture2D(uAccumTexture, sampleUV).rgb;
+                color = mix(prevColor, radiance, 1.0 / (float(uFrame) + 1.0));
             }
+            gl_FragColor = vec4(color, 1.0);
         }
+    </script>
 
-        function handleTouchEnd() {
-            joystickActive = false;
-            joystickKnob.style.transform = `translate(0px, 0px)`;
-            if (players[0].connected) {
-                players[0].touchDx = 0;
-                players[0].touchDy = 0;
-            }
+    <script id="displayFrag" type="x-shader/x-fragment">
+        precision highp float;
+        uniform sampler2D uTexture;
+        uniform vec2 uResolution;
+        void main() {
+            vec3 col = texture2D(uTexture, gl_FragCoord.xy / uResolution).rgb;
+            col = pow(col, vec3(1.0/2.2));
+            gl_FragColor = vec4(col, 1.0);
         }
+    </script>
 
-        window.addEventListener('touchstart', handleTouchStart, { passive: false });
-        window.addEventListener('touchmove', handleTouchMove, { passive: false });
-        window.addEventListener('touchend', handleTouchEnd);
+    <script>
+        let renderer, camera, rtA, rtB, material, displayMat;
+        let samples = 0, yaw = 0, pitch = -0.35;
+        const keys = {}, balls = [], numBalls = 10;
+        const ballPositions = new Float32Array(numBalls * 3);
+        const ARENA_SIZE = 5.0;
+        let audioCtx = null;
 
-        function initUI() {
-            if (gameStarted) return;
-            playerGrid.innerHTML = '';
-            players.forEach(player => {
-                const div = document.createElement('div');
-                const statusClass = player.connected ? 'bg-green-custom' : 'bg-red-custom waiting';
-                div.className = `player-card ${statusClass}`;
-                div.innerHTML = `
-                    <div class="text-2xl md:text-4xl">Speler ${player.id}</div>
-                    <div class="text-sm md:text-lg mt-2 opacity-80 uppercase tracking-tighter">
-                        ${player.connected ? 'Gereed' : 'Druk op B'}
-                    </div>
-                `;
-                playerGrid.appendChild(div);
-            });
+        const inputState = { moveX: 0, moveY: 0, lookX: 0, lookY: 0 };
 
-            // Toon startbericht als er tenminste één speler is
-            if (players.some(p => p.connected)) {
-                startMessage.classList.remove('hidden');
-            } else {
-                startMessage.classList.add('hidden');
-            }
-        }
-
-        function playSound(freq1, freq2, duration = 0.3, volume = 0.1, type = 'sine') {
-            if (!audioCtx) return;
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            osc.type = type;
-            osc.frequency.setValueAtTime(freq1, audioCtx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(freq2, audioCtx.currentTime + 0.1);
-            gain.gain.setValueAtTime(volume, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
-            osc.start();
-            osc.stop(audioCtx.currentTime + duration);
-        }
-
-        function playVictorySound() {
-            if (!audioCtx) return;
-            const now = audioCtx.currentTime;
-            const notes = [523.25, 659.25, 783.99, 1046.50, 1318.51]; 
-            notes.forEach((freq, i) => {
-                const osc = audioCtx.createOscillator();
-                const gain = audioCtx.createGain();
-                osc.type = 'square';
-                osc.frequency.setValueAtTime(freq, now + i * 0.1);
-                gain.gain.setValueAtTime(0.05, now + i * 0.1);
-                gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.1 + 0.6);
-                osc.connect(gain);
-                gain.connect(audioCtx.destination);
-                osc.start(now + i * 0.1);
-                osc.stop(now + i * 0.1 + 0.7);
-            });
-        }
-
-        function enableAudio() {
-            if (!audioEnabled) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                audioEnabled = true;
-            }
+        function ensureAudioActivated() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             if (audioCtx.state === 'suspended') audioCtx.resume();
         }
 
-        function draw3DBall(x, y, radius, color, isPlayer = false, invulnerable = false) {
-            ctx.save();
-            if (isPlayer && invulnerable && Math.floor(Date.now() / 150) % 2 === 0) {
-                ctx.restore();
-                return;
-            }
-            ctx.beginPath();
-            ctx.ellipse(x, y + radius * 0.8, radius * 0.8, radius * 0.2, 0, 0, Math.PI * 2);
-            ctx.fillStyle = "rgba(0,0,0,0.3)";
-            ctx.fill();
-            ctx.closePath();
-
-            const gradient = ctx.createRadialGradient(x - radius * 0.3, y - radius * 0.3, radius * 0.1, x, y, radius);
-            gradient.addColorStop(0, '#ffffff'); 
-            gradient.addColorStop(0.2, color);  
-            gradient.addColorStop(1, '#000000'); 
-            ctx.beginPath();
-            ctx.arc(x, y, radius, 0, Math.PI * 2);
-            ctx.fillStyle = gradient;
-            if (isPlayer) {
-                ctx.shadowBlur = invulnerable ? 10 : 20;
-                ctx.shadowColor = invulnerable ? '#ffffff' : color;
-            }
-            ctx.fill();
-            ctx.closePath();
-            ctx.restore();
+        function playImpactSound(velocity) {
+            ensureAudioActivated();
+            if (velocity < 0.01) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(120 + Math.random() * 40, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(20, audioCtx.currentTime + 0.1);
+            gain.gain.setValueAtTime(Math.min(velocity * 1.5, 0.4), audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.12);
+            osc.connect(gain); gain.connect(audioCtx.destination);
+            osc.start(); osc.stop(audioCtx.currentTime + 0.12);
         }
 
-        function getBaseVelocity() {
-            const diagonal = Math.sqrt(canvas.width ** 2 + canvas.height ** 2);
-            return diagonal / (8 * 60); 
-        }
-
-        function handleGlobalStart() {
-            if (!gameStarted && players.some(p => p.connected)) {
-                startGame();
-            } else if (isGameOver) {
-                startGame();
-            }
-        }
-
-        function startGame() {
-            isGameOver = false;
-            gameStarted = true;
-            speedMultiplier = 1.0; 
-            lastSpeedUpdateTime = Date.now();
-            
-            gameOverOverlay.style.display = 'none';
-            lobby.style.display = 'none';
-            gameUI.style.display = 'block';
-            
-            resizeCanvas();
-
-            players.forEach(p => {
-                if(p.connected) {
-                    p.x = Math.random() * (canvas.width - 100) + 50;
-                    p.y = Math.random() * (canvas.height - 100) + 50;
-                    p.alive = true;
-                    p.invulnerable = true;
-                }
-            });
-
-            setTimeout(() => {
-                players.forEach(p => p.invulnerable = false);
-            }, 5000);
-
-            const freshBaseSpeed = getBaseVelocity();
-            enemyBalls = [];
-            for (let i = 0; i < 5; i++) {
-                const angle = Math.random() * Math.PI * 2;
-                enemyBalls.push({
-                    x: Math.random() * (canvas.width - 100) + 50,
-                    y: Math.random() * (canvas.height - 100) + 50,
-                    vx: Math.cos(angle) * freshBaseSpeed,
-                    vy: Math.sin(angle) * freshBaseSpeed,
-                    radius: 30,
-                    color: getRandomColor(),
-                    baseSpeed: freshBaseSpeed
+        function initPhysics() {
+            for(let i=0; i<numBalls; i++) {
+                const x = i === 0 ? 0 : (Math.random() - 0.5) * 8;
+                const z = i === 0 ? 0 : (Math.random() - 0.5) * 8;
+                balls.push({
+                    id: i, pos: new THREE.Vector3(x, -0.5, z), vel: new THREE.Vector3(0, 0, 0),
+                    radius: 0.5, color: i === 0 ? new THREE.Vector3(1, 1, 1) : new THREE.Vector3(Math.random(), Math.random(), Math.random())
                 });
             }
-
-            if (!window.loopRunning) {
-                window.loopRunning = true;
-                requestAnimationFrame(gameLoop);
-            }
         }
-
-        function getRandomColor() {
-            const colors = ['#ff4444', '#4444ff', '#ffff44', '#ff44ff', '#44ffff', '#ffffff', '#ff9900'];
-            return colors[Math.floor(Math.random() * colors.length)];
-        }
-
-        function resizeCanvas() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-        }
-
-        window.addEventListener('resize', resizeCanvas);
 
         function resolveBallCollision(b1, b2) {
-            const dx = b2.x - b1.x;
-            const dy = b2.y - b1.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-
-            if (distance < b1.radius + b2.radius) {
-                const nx = dx / distance;
-                const ny = dy / distance;
-                const vRelative = (b1.vx - b2.vx) * nx + (b1.vy - b2.vy) * ny;
-                
-                if (vRelative > 0) {
-                    const impulse = vRelative;
-                    b1.vx -= impulse * nx;
-                    b1.vy -= impulse * ny;
-                    b2.vx += impulse * nx;
-                    b2.vy += impulse * ny;
-                    
-                    [b1, b2].forEach(b => {
-                        const currentMag = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
-                        if (currentMag > 0) {
-                            b.vx = (b.vx / currentMag) * b.baseSpeed;
-                            b.vy = (b.vy / currentMag) * b.baseSpeed;
-                        }
-                    });
-                    playSound(150, 200, 0.1, 0.05, 'triangle');
+            const diff = b1.pos.clone().sub(b2.pos);
+            const dist = diff.length();
+            const minDist = b1.radius + b2.radius;
+            if (dist < minDist) {
+                const overlap = minDist - dist;
+                const correction = diff.clone().normalize().multiplyScalar(overlap / 2);
+                b1.pos.add(correction); b2.pos.sub(correction);
+                const normal = diff.normalize();
+                const relativeVelocity = b1.vel.clone().sub(b2.vel);
+                const velocityAlongNormal = relativeVelocity.dot(normal);
+                if (velocityAlongNormal < 0) {
+                    const restitution = 0.7;
+                    const j = -(1 + restitution) * velocityAlongNormal;
+                    const impulse = normal.multiplyScalar(j / 2);
+                    b1.vel.add(impulse); b2.vel.sub(impulse);
+                    if (b1.id !== 0) b1.color.set(Math.random(), Math.random(), Math.random());
+                    if (b2.id !== 0) b2.color.set(Math.random(), Math.random(), Math.random());
+                    playImpactSound(Math.abs(velocityAlongNormal));
                 }
-                const overlap = b1.radius + b2.radius - distance;
-                b1.x -= overlap * 0.5 * nx;
-                b1.y -= overlap * 0.5 * ny;
-                b2.x += overlap * 0.5 * nx;
-                b2.y += overlap * 0.5 * ny;
             }
         }
 
-        function checkEndGame() {
-            if (isGameOver) return;
-            const connectedPlayers = players.filter(p => p.connected);
-            const alivePlayers = connectedPlayers.filter(p => p.alive);
+        function updateGamepad() {
+            const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+            let gp = null;
+            for (let i = 0; i < gamepads.length; i++) {
+                if (gamepads[i]) { gp = gamepads[i]; break; }
+            }
+
+            if (gp) {
+                const applyDeadzone = (val) => Math.abs(val) < 0.15 ? 0 : val;
+                inputState.moveX = applyDeadzone(gp.axes[0]);
+                inputState.moveY = applyDeadzone(gp.axes[1]);
+                inputState.lookX = applyDeadzone(gp.axes[2]);
+                inputState.lookY = applyDeadzone(gp.axes[3]);
+            }
+        }
+
+        function updatePhysics() {
+            updateGamepad();
+            const player = balls[0];
+            let moving = false;
             
-            if (connectedPlayers.length > 1) {
-                if (alivePlayers.length === 1) endGame(alivePlayers[0]);
-                else if (alivePlayers.length === 0) endGame(null);
-            } else if (connectedPlayers.length === 1) {
-                if (alivePlayers.length === 0) endGame(null, true);
+            let mx = 0, mz = 0;
+            if (keys['KeyW']) mz -= 1; if (keys['KeyS']) mz += 1;
+            if (keys['KeyA']) mx -= 1; if (keys['KeyD']) mx += 1;
+            
+            if (Math.abs(inputState.lookX) > 0.01 || Math.abs(inputState.lookY) > 0.01) {
+                yaw -= inputState.lookX * 0.07;
+                pitch = Math.max(-1.4, Math.min(0.2, pitch - inputState.lookY * 0.05));
+                moving = true;
             }
-        }
 
-        function endGame(winner = null, isSoloGameOver = false) {
-            isGameOver = true;
-            gameOverOverlay.style.display = 'flex';
-            if (isSoloGameOver) {
-                winnerText.innerText = `GAME OVER!`;
-            } else if (winner) {
-                winnerText.innerText = `SPELER ${winner.id} HEEFT GEWONNEN!`;
-            } else {
-                winnerText.innerText = `GOED GESPEELD!`;
+            const finalMx = mx + inputState.moveX;
+            const finalMz = mz + inputState.moveY;
+
+            if (Math.abs(finalMx) > 0.01 || Math.abs(finalMz) > 0.01) {
+                const forward = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+                const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+                player.vel.addScaledVector(right, finalMx * 0.02);
+                player.vel.addScaledVector(forward, finalMz * 0.02);
+                moving = true;
             }
-            playVictorySound();
-        }
 
-        function gameLoop() {
-            if (!gameStarted) return;
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            const now = Date.now();
-            if (!isGameOver) {
-                if (now - lastSpeedUpdateTime > 1000) {
-                    speedMultiplier *= 1.02; 
-                    lastSpeedUpdateTime = now;
+            balls.forEach((b) => {
+                b.vel.y -= 0.008; b.pos.add(b.vel); b.vel.multiplyScalar(0.96);
+                if(b.pos.y - b.radius < -1.0) {
+                    b.pos.y = -1.0 + b.radius;
+                    if(Math.abs(b.vel.y) > 0.02) playImpactSound(Math.abs(b.vel.y) * 0.5);
+                    b.vel.y *= -0.2;
                 }
-            }
-
-            const gamepads = navigator.getGamepads();
-
-            enemyBalls.forEach(b => {
-                let hitWall = false;
-                b.x += b.vx * speedMultiplier;
-                b.y += b.vy * speedMultiplier;
-
-                if (b.x - b.radius < 0) { b.vx = Math.abs(b.vx); hitWall = true; }
-                else if (b.x + b.radius > canvas.width) { b.vx = -Math.abs(b.vx); hitWall = true; }
-
-                if (b.y - b.radius < 0) { b.vy = Math.abs(b.vy); hitWall = true; }
-                else if (b.y + b.radius > canvas.height) { b.vy = -Math.abs(b.vy); hitWall = true; }
-
-                if (hitWall) playSound(80, 60, 0.05, 0.03, 'square');
+                if (Math.abs(b.pos.x) > ARENA_SIZE - b.radius) { b.pos.x = Math.sign(b.pos.x)*(ARENA_SIZE-b.radius); playImpactSound(Math.abs(b.vel.x)); b.vel.x *= -0.6; moving = true; }
+                if (Math.abs(b.pos.z) > ARENA_SIZE - b.radius) { b.pos.z = Math.sign(b.pos.z)*(ARENA_SIZE-b.radius); playImpactSound(Math.abs(b.vel.z)); b.vel.z *= -0.6; moving = true; }
+                if (b.vel.length() > 0.008) moving = true;
             });
 
-            for (let i = 0; i < enemyBalls.length; i++) {
-                for (let j = i + 1; j < enemyBalls.length; j++) {
-                    resolveBallCollision(enemyBalls[i], enemyBalls[j]);
-                }
+            for (let i = 0; i < balls.length; i++) {
+                for (let j = i + 1; j < balls.length; j++) resolveBallCollision(balls[i], balls[j]);
             }
 
-            enemyBalls.forEach(b => draw3DBall(b.x, b.y, b.radius, b.color));
+            const targetCam = player.pos.clone().add(new THREE.Vector3(0, 0, 5).applyEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ')));
+            camera.position.lerp(targetCam, 0.25);
+            camera.lookAt(player.pos.clone().add(new THREE.Vector3(0, 0.5, 0)));
+            
+            if (camera.position.distanceTo(targetCam) > 0.01) moving = true;
+            if (moving) samples = 0;
+        }
 
-            players.forEach(p => {
-                if (!p.connected || !p.alive) return;
-                const gp = gamepads[p.gamepadIndex];
-                
-                if (!isGameOver) {
-                    const speed = 10;
-                    // Gamepad input
-                    if (gp) {
-                        if (Math.abs(gp.axes[0]) > 0.1) p.x += gp.axes[0] * speed;
-                        if (Math.abs(gp.axes[1]) > 0.1) p.y += gp.axes[1] * speed;
+        function setupUniversalControls() {
+            // Toon joysticks alleen als touch ondersteund wordt
+            const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+            if (isTouch) {
+                document.getElementById('touch-controls').style.display = 'flex';
+            }
+
+            const setupJoystick = (containerId, knobId, isLeft) => {
+                const container = document.getElementById(containerId);
+                const knob = document.getElementById(knobId);
+                let activePointerId = null;
+
+                const updatePosition = (clientX, clientY) => {
+                    const rect = container.getBoundingClientRect();
+                    const centerX = rect.left + rect.width / 2;
+                    const centerY = rect.top + rect.height / 2;
+                    let dx = clientX - centerX;
+                    let dy = clientY - centerY;
+                    const maxDist = rect.width / 2;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+
+                    if (dist > maxDist) {
+                        dx *= maxDist / dist;
+                        dy *= maxDist / dist;
                     }
-                    // Touch input
-                    if (p.id === 1 && isTouchDevice) {
-                        p.x += p.touchDx * speed;
-                        p.y += p.touchDy * speed;
+
+                    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+                    
+                    if (isLeft) {
+                        inputState.moveX = dx / maxDist;
+                        inputState.moveY = dy / maxDist;
+                    } else {
+                        inputState.lookX = dx / maxDist;
+                        inputState.lookY = dy / maxDist;
                     }
+                    ensureAudioActivated();
+                };
 
-                    p.x = Math.max(p.radius, Math.min(canvas.width - p.radius, p.x));
-                    p.y = Math.max(p.radius, Math.min(canvas.height - p.radius, p.y));
-                }
+                container.addEventListener('pointerdown', (e) => {
+                    activePointerId = e.pointerId;
+                    container.setPointerCapture(e.pointerId);
+                    updatePosition(e.clientX, e.clientY);
+                });
 
-                if (!p.invulnerable && !isGameOver) {
-                    enemyBalls.forEach(b => {
-                        const dx = p.x - b.x;
-                        const dy = p.y - b.y;
-                        const dist = Math.sqrt(dx * dx + dy * dy);
-                        if (dist < p.radius + b.radius) {
-                            p.alive = false;
-                            playSound(300, 100, 0.4, 0.2);
-                            checkEndGame();
-                        }
-                    });
-                }
-                draw3DBall(p.x, p.y, p.radius, '#22c55e', true, p.invulnerable);
-                ctx.fillStyle = "white";
-                ctx.font = "bold 16px Arial";
-                ctx.textAlign = "center";
-                ctx.fillText(`P${p.id}`, p.x, p.y + 6);
+                container.addEventListener('pointermove', (e) => {
+                    if (activePointerId === e.pointerId) {
+                        updatePosition(e.clientX, e.clientY);
+                    }
+                });
+
+                const stop = (e) => {
+                    if (activePointerId === e.pointerId) {
+                        activePointerId = null;
+                        knob.style.transform = 'translate(0px, 0px)';
+                        if (isLeft) { inputState.moveX = 0; inputState.moveY = 0; }
+                        else { inputState.lookX = 0; inputState.lookY = 0; }
+                    }
+                };
+
+                container.addEventListener('pointerup', stop);
+                container.addEventListener('pointercancel', stop);
+            };
+
+            setupJoystick('move-joystick', 'move-knob', true);
+            setupJoystick('look-joystick', 'look-knob', false);
+        }
+
+        function init() {
+            renderer = new THREE.WebGLRenderer({ antialias: false });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 500);
+            
+            initPhysics(); 
+            setupUniversalControls();
+
+            const p = { format: THREE.RGBAFormat, type: THREE.FloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter };
+            rtA = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, p);
+            rtB = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, p);
+
+            material = new THREE.ShaderMaterial({
+                uniforms: {
+                    uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+                    uFrame: { value: 0 }, uCamPos: { value: new THREE.Vector3() },
+                    uCamDir: { value: new THREE.Vector3() }, uCamUp: { value: new THREE.Vector3() },
+                    uCamRight: { value: new THREE.Vector3() }, uAccumTexture: { value: null },
+                    uBallPos: { value: ballPositions }, uBallCol: { value: balls.map(b => b.color) },
+                    uBallRad: { value: balls.map(b => b.radius) }
+                },
+                fragmentShader: document.getElementById('pathTracerFrag').textContent,
+                vertexShader: `void main() { gl_Position = vec4(position, 1.0); }`
             });
 
-            requestAnimationFrame(gameLoop);
-        }
+            displayMat = new THREE.ShaderMaterial({
+                uniforms: { uTexture: { value: null }, uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) } },
+                fragmentShader: document.getElementById('displayFrag').textContent,
+                vertexShader: `void main() { gl_Position = vec4(position, 1.0); }`
+            });
 
-        function updateLobbyLogic() {
-            const gamepads = navigator.getGamepads();
-            for (const gp of gamepads) {
-                if (!gp) continue;
-                const bPressed = gp.buttons[1]?.pressed;
-                const aPressed = gp.buttons[0]?.pressed;
+            const scene = new THREE.Scene(), dScene = new THREE.Scene();
+            scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
+            dScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), displayMat));
 
-                if (bPressed && !gameStarted) {
-                    enableAudio();
-                    const alreadyMapped = players.some(p => p.gamepadIndex === gp.index);
-                    if (!alreadyMapped) {
-                        const freePlayer = players.find(p => !p.connected);
-                        if (freePlayer) {
-                            freePlayer.connected = true;
-                            freePlayer.gamepadIndex = gp.index;
-                            playSound(523, 1046);
-                            initUI();
-                        }
-                    }
-                }
+            window.addEventListener('keydown', e => { keys[e.code] = true; ensureAudioActivated(); });
+            window.addEventListener('keyup', e => keys[e.code] = false);
 
-                if (aPressed) {
-                    handleGlobalStart();
-                }
+            function animate() {
+                requestAnimationFrame(animate);
+                updatePhysics();
+                material.uniforms.uFrame.value = samples;
+                material.uniforms.uCamPos.value.copy(camera.position);
+                material.uniforms.uCamDir.value.set(0,0,-1).applyQuaternion(camera.quaternion);
+                material.uniforms.uCamUp.value.set(0,1,0).applyQuaternion(camera.quaternion);
+                material.uniforms.uCamRight.value.set(1,0,0).applyQuaternion(camera.quaternion);
+                balls.forEach((b, i) => { ballPositions[i*3]=b.pos.x; ballPositions[i*3+1]=b.pos.y; ballPositions[i*3+2]=b.pos.z; });
+                material.uniforms.uAccumTexture.value = rtA.texture;
+                renderer.setRenderTarget(rtB); renderer.render(scene, new THREE.Camera());
+                displayMat.uniforms.uTexture.value = rtB.texture;
+                renderer.setRenderTarget(null); renderer.render(dScene, new THREE.Camera());
+                let t = rtA; rtA = rtB; rtB = t;
+                samples++;
             }
-            requestAnimationFrame(updateLobbyLogic);
+            animate();
         }
-
-        window.addEventListener("gamepaddisconnected", (e) => {
-            const player = players.find(p => p.gamepadIndex === e.gamepad.index);
-            if (player) {
-                player.connected = false;
-                player.gamepadIndex = null;
-                if (!gameStarted) initUI();
-            }
-        });
-
-        initUI();
-        updateLobbyLogic();
+        window.onload = init;
     </script>
 </body>
 </html>
